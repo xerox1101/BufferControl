@@ -57,7 +57,7 @@ class ActiveViewList(sublime_plugin.EventListener):
     # Always put the newest view on the end
     self.activeViewList.append(view)
 
-  # When a veiw is closed remove the view's ID from our history list
+  # When a view is closed remove the view's ID from our history list
   def on_close(self, view):
     # Since we've just closed this view remove it from the history
     if view in self.activeViewList:
@@ -81,9 +81,10 @@ class ActiveViewList(sublime_plugin.EventListener):
   # Unlock the list and update it so that the current view is at the head of
   # the list if it isn't already. This makes sure that if you have changed the
   # view while locked the history at least reflects that.
-  def unlock(self, currentView):
+  def unlock(self, currentView=None):
     self.activeViewListLocked = False
-    self.on_activated(currentView)
+    if currentView != None:
+      self.on_activated(currentView)
 
 # Implements the switch_buffer command
 class SwitchBufferCommand(sublime_plugin.WindowCommand):
@@ -131,7 +132,7 @@ class KillBufferCommand(sublime_plugin.WindowCommand):
     # figure out what that tab is here.
     if self.recentOnKill:
       # We only need to do anything here if this is the active view in the group
-      # it's in (which we swtiched to above) since killing an inactive view
+      # it's in (which we switched to above) since killing an inactive view
       # won't impact things
       if view == self.window.active_view():
         # Switch the active view in this group to the next one
