@@ -29,35 +29,61 @@ import sublime, sublime_plugin
 import os
 
 # List of all views by which was last opened
-activeViewList = []
+activeViewListObj = None
 
-class BufferControlEventListener(sublime_plugin.EventListener):
+class ActiveViewList(sublime_plugin.EventListener):
+  def __init__(self, *args, **kwargs):
+    sublime_plugin.EventListener.__init__(self, *args, **kwargs)
+
+    # Initialize the internal data structures
+    self.activeViewList = []
+    self.activeViewListLocked = False
+
+    # Store this globally for later access
+    global activeViewListObj
+    activeViewListObj = self
+
   # When we activate a view either add it to the list or bump it up to the
   # beginning since it's now the most recent
   def on_activated(self, view):
+    # If we're locked then ignore this change
+    if self.activeViewListLocked:
+      return
+
     # If this is already in the list then remove it
-    if view in activeViewList:
-      activeViewList.remove(view)
+    if view in self.activeViewList:
+      self.activeViewList.remove(view)
 
     # Always put the newest view on the end
-    activeViewList.append(view)
+    self.activeViewList.append(view)
 
   # When a veiw is closed remove the view's ID from our history list
   def on_close(self, view):
     # Since we've just closed this view remove it from the history
-    if view in activeViewList:
-      activeViewList.remove(view)
+    if view in self.activeViewList:
+      self.activeViewList.remove(view)
 
-# This utility can be passed to the sort function to sort a list of views by
-# which one was last used
-def sort_views_by_recent(views):
-  # Helper function for sorting
-  def sort_helper(view):
-    if view in activeViewList:
-      return activeViewList.index(view)
-    else:
-      return -1
-  return sorted(views, key=sort_helper, reverse=True)
+  # This utility can be passed to the sort function to sort a list of views by
+  # which one was last used
+  def sort_views_by_recent(self, views):
+    # Helper function for sorting
+    def sort_helper(view):
+      if view in self.activeViewList:
+        return self.activeViewList.index(view)
+      else:
+        return -1
+    return sorted(views, key=sort_helper, reverse=True)
+
+  # Lock the list to prevent any changes from being tracked
+  def lock(self):
+    self.activeViewListLocked = True
+
+  # Unlock the list and update it so that the current view is at the head of
+  # the list if it isn't already. This makes sure that if you have changed the
+  # view while locked the history at least reflects that.
+  def unlock(self, currentView):
+    self.activeViewListLocked = False
+    self.on_activated(currentView)
 
 # Implements the switch_buffer command
 class SwitchBufferCommand(sublime_plugin.WindowCommand):
@@ -91,6 +117,10 @@ class KillBufferCommand(sublime_plugin.WindowCommand):
   def action(self, view):
     startGroup = self.window.active_group()
 
+    # The code below will change views before and after closing them. To prevent
+    # this from corrupting the activeViewListObj we lock modifications to it.
+    activeViewListObj.lock()
+
     # Switch to the group with the view we're closing
     for group in range(self.window.num_groups()):
       if view in self.window.views_in_group(group):
@@ -106,7 +136,7 @@ class KillBufferCommand(sublime_plugin.WindowCommand):
       if view == self.window.active_view():
         # Switch the active view in this group to the next one
         viewsInGroup = self.window.views_in_group(self.window.active_group())
-        viewsInGroup = sort_views_by_recent(viewsInGroup)
+        viewsInGroup = activeViewListObj.sort_views_by_recent(viewsInGroup)
         viewsInGroup.remove(view)
         if len(viewsInGroup) > 0:
           self.window.focus_view(viewsInGroup[0])
@@ -123,6 +153,9 @@ class KillBufferCommand(sublime_plugin.WindowCommand):
       self.window.focus_view(startView)
     self.window.focus_group(startGroup)
 
+    # Unlock the list now that we're done
+    activeViewListObj.unlock(self.window.active_view())
+
 # Helper routine for buffer selection from a quick panel. This is used by the
 # switch_buffer and kill_buffer commands to create the list of files.
 class BufferSelector(object):
@@ -137,9 +170,9 @@ class BufferSelector(object):
     else:
       views = self.window.views()
 
-    # Sort the views using the activeViewList if requested
+    # Sort the views using the activeViewListObj if requested
     if sortByRecent:
-      views = sort_views_by_recent(views)
+      views = activeViewListObj.sort_views_by_recent(views)
 
     # We don't want to show the current view first in certain cases so
     # move it to the end here
